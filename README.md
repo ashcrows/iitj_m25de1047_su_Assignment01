@@ -113,11 +113,11 @@ Set `DEVICE = torch.device("cpu")` manually to override.
 | Question | Key Result |
 |---|---|
 | Q1 MFCC | 13-coefficient manual pipeline, shape (298, 13) |
-| Q1 Leakage | Hamming best SNR: 28.91 dB; lowest leakage: Hanning 0.0201 |
-| Q1 V/UV | Voiced 46%, Unvoiced 34%, Silence 20% |
-| Q1 RMSE | 105.63 ms boundary alignment error |
-| Q2 Disentangled | Best val acc 1.000, EER 0.0000 |
-| Q2 Baseline | Best val acc 0.000, EER 0.0000 |
-| Q3 Audit | 2.0× male/female-proxy imbalance detected |
-| Q3 DNSMOS | Orig 3.642 / Trans 4.031 (no degradation) |
-| Q3 FAD | 4482.99 (pitch shift causes distribution shift) |
+| Q1 Leakage | Hamming best SNR: 30.84 dB; lowest leakage: Hanning 0.0302 |
+| Q1 V/UV | Voiced 43.1%, Unvoiced 36.9%, Silence 20% |
+| Q1 RMSE | 163.43 ms boundary alignment error |
+| Q2 Disentangled | Best val acc 1.000, EER 0.0003 |
+| Q2 Baseline | Best val acc 0.000, EER 0.0072 |
+| Q3 Audit | 2.17× male/female-proxy imbalance detected (significant bias) |
+| Q3 DNSMOS | Orig 5.000 / Trans 5.000 (no quality loss) |
+| Q3 FAD | 1265.93 (pitch shift causes distribution shift) |
