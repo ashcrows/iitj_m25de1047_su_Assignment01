@@ -1,9 +1,18 @@
-torch>=2.1.0
-torchaudio>=2.1.0
+# Speech Assignment Requirements
+# Python 3.11 or 3.12 recommended (NOT 3.13/3.14)
+#
+#
+# One-time setup:
+#   brew install ffmpeg python@3.11
+#   python3.11 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+
+torch>=2.2.2
+torchaudio>=2.2.2
 torchvision>=0.16.0        # indirect dep for some torch installs
 
-numpy>=1.24.0
-scipy>=1.10.0
+numpy>=1.26.4
+scipy>=1.13.0
 matplotlib>=3.7.0
 scikit-learn>=1.3.0
 
@@ -17,10 +26,17 @@ soundfile>=0.12.1
 
 # Extra
 transformers
-datasets
 huggingface-hub
 accelerate
 pandas
 tqdm
 jiwer
 praatio
+torchcodec
+# privacymodule
+reportlab>=4.2.2
+
+
+
+
+

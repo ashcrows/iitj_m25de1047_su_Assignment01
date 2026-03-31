@@ -1,145 +1,123 @@
-# iitj_m25de1047_su_Assignment01
+# Speech Understanding — Assignment 1
+**IITJ M25DE1047**
 
-## Code Guide
-
-### Setup
+## Quick Start (macOS)
 
 ```bash
-# 1. Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+# 1. Prerequisites
+brew install ffmpeg python@3.11
 
-# 2. Install dependencies
+# 2. Create virtual environment
+python3.11 -m venv .venv && source .venv/bin/activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
+
+# 4. Run all questions (dataset downloads automatically to data/ on first run)
+python run_all.py
+
+# 5. Generate PDF reports
+python generate_reports.py
 ```
 
-> **macOS note**: PyTorch will use MPS (Apple Silicon) automatically when available.  
-> All scripts fall back to CPU if MPS is not detected.
+---
+
+## Project Structure
+
+```
+project/
+├── dataset.py              ← Shared LibriSpeech loader (used by Q1, Q2, Q3)
+├── run_all.py              ← Master runner (runs all scripts in order)
+├── generate_reports.py     ← Builds all 3 PDF reports
+├── requirements.txt
+├── README.md
+│
+├── data/                   ← Dataset lives here (auto-created)
+│   └── LibriSpeech/test-clean/   ← downloaded once, reused by all questions
+│
+├── q1/
+│   ├── mfcc_manual.py      ← Manual MFCC pipeline (no librosa)
+│   ├── leakage_snr.py      ← Spectral leakage & SNR for 3 window types
+│   ├── voiced_unvoiced.py  ← Cepstrum-based V/UV/Silence boundary detection
+│   ├── phonetic_mapping.py ← Word boundary alignment + RMSE
+│   └── outputs/            ← Plots saved here
+│
+├── q1_report.pdf           ← Generated report
+│
+├── q2/
+│   ├── train.py            ← Train disentangled + baseline speaker models
+│   ├── eval.py             ← EER, t-SNE, comparison plots
+│   ├── configs/default.yaml
+│   ├── results/            ← Plots + JSON metrics
+│   ├── checkpoints/        ← Saved model weights (.pt)
+│   └── review.pdf          ← Generated report + paper review
+│
+└── q3/
+    ├── audit.py                        ← Bias audit of LibriSpeech
+    ├── privacymodule.py                ← PyTorch PP voice transformer
+    ├── pp_demo.py                      ← Demo: saves original + transformed WAV
+    ├── train_fair.py                   ← Fairness-loss CTC ASR training
+    ├── evaluation_scripts/fad_eval.py  ← FAD proxy + DNSMOS proxy
+    ├── audit_plots/                    ← Audit visualisations
+    ├── examples/                       ← original.wav + transformed.wav
+    ├── fair_results/                   ← Fairness training curves
+    └── q3_report.pdf                   ← Generated report
+```
 
 ---
 
-### Dataset
+## Dataset
 
-All scripts auto-download **LibriSpeech `test-clean`** (~346 MB) on first run into `./data/`.  
-For Q2 full training, edit `CONFIG["dataset_url"] = "train-clean-100"` in `q2/train.py`.
+All three questions share **one copy** of LibriSpeech `test-clean` stored in `data/`.
+
+- `dataset.py` is the single entry point — import `get_librispeech()` from any script.
+- The dataset is downloaded **once** on first use and never re-downloaded.
+- For full-scale Q2 training, change `url = "train-clean-100"` in `q2/configs/default.yaml`.
 
 ---
 
-### Question 1 — Multi-Stage Cepstral Feature Extraction & Phoneme Boundary Detection
-
-| Script | What it does |
-|---|---|
-| `q1/mfcc_manual.py` | Full manual MFCC pipeline (pre-emphasis → DCT) |
-| `q1/leakage_snr.py` | Spectral leakage & SNR for Rectangular / Hamming / Hanning windows |
-| `q1/voiced_unvoiced.py` | Cepstrum-based V/UV/Silence boundary detection |
-| `q1/phonetic_mapping.py` | Wav2Vec2 forced alignment + RMSE vs manual boundaries |
+## Running Individual Questions
 
 ```bash
+# Q1
 cd q1
 python mfcc_manual.py
 python leakage_snr.py
 python voiced_unvoiced.py
-python phonetic_mapping.py    # downloads torchaudio MMS model on first run
-```
+python phonetic_mapping.py
 
-**Outputs** saved to `q1/outputs/`:
-- `mfcc_manual.png`
-- `leakage_snr_comparison.png`, `leakage_snr_bar.png`
-- `voiced_unvoiced_boundaries.png`
-- `phonetic_mapping.png`
-
----
-
-### Question 2 — Disentangled Representation Learning for Speaker Recognition
-
-| Script | What it does |
-|---|---|
-| `q2/train.py` | Trains Disentangled model (TDNN + GRL) and Baseline TDNN |
-| `q2/eval.py` | Computes EER, plots t-SNE of speaker embeddings |
-| `q2/configs/default.yaml` | Hyperparameter reference |
-
-```bash
+# Q2
 cd q2
-python train.py    # trains both models, saves checkpoints/
-python eval.py     # loads checkpoints, prints EER, plots t-SNE
-```
+python train.py    # trains both models (~5 min on MPS)
+python eval.py     # loads checkpoints, computes EER, plots t-SNE
 
-**Outputs** in `q2/results/`:
-- `q2_training_curves.png`
-- `embedding_tsne.png`
-- `eer_comparison.png`
-- `disentangled_history.json`, `baseline_history.json`, `eval_results.json`
-
-**Checkpoints** in `q2/checkpoints/`:
-- `disentangled_final.pt` — disentangled model weights
-- `baseline_final.pt`     — baseline model weights
-
----
-
-### Question 3 — Ethical Auditing & Privacy-Preserving Transformation
-
-| Script | What it does |
-|---|---|
-| `q3/audit.py` | Programmatic bias audit (gender proxy, SNR, speaking rate) |
-| `q3/privacymodule.py` | PyTorch PP module: pitch shift + tempo normalisation |
-| `q3/pp_demo.py` | End-to-end demo: saves original + transformed audio pair |
-| `q3/train_fair.py` | CTC ASR training with custom FairnessLoss |
-| `q3/evaluation_scripts/fad_dnsmos_eval.py` | FAD proxy + DNSMOS proxy evaluation |
-
-```bash
+# Q3
 cd q3
 python audit.py
 python pp_demo.py
-python privacymodule.py
 python train_fair.py
-python evaluation_scripts/fad_dnsmos_eval.py
-```
-
-**Outputs**:
-- `q3/audit_plots/audit_plots.png`
-- `q3/examples/demo_original.wav`, `demo_transformed.wav`
-- `q3/examples/spectrogram_comparison.png`, `pp_demo_spectrograms.png`
-- `q3/fair_results/fair_training_curves.png`
-- `q3/evaluation_scripts/audio_quality_eval.png`, `eval_audio_quality.json`
-
----
-
-### Project Structure
-
-```
-speech_assignment/
-├── requirements.txt
-├── README.md
-├── data/                    # auto-created; LibriSpeech downloads here
-├── q1/
-│   ├── mfcc_manual.py
-│   ├── leakage_snr.py
-│   ├── voiced_unvoiced.py
-│   ├── phonetic_mapping.py
-│   └── outputs/
-├── q2/
-│   ├── train.py
-│   ├── eval.py
-│   ├── configs/
-│   │   └── default.yaml
-│   ├── results/
-│   └── checkpoints/
-└── q3/
-    ├── audit.py
-    ├── privacymodule.py
-    ├── pp_demo.py
-    ├── train_fair.py
-    ├── evaluation_scripts/
-    │   └── fad_dnsmos_eval.py
-    ├── audit_plots/
-    ├── examples/
-    └── fair_results/
+python evaluation_scripts/fad_eval.py
 ```
 
 ---
 
-### Notes
+## Device Support
 
-- **Quick run**: All scripts default to `test-clean` (346 MB, ~2600 utterances, capped at 300–500 samples) so they complete in minutes on a laptop.
-- **Full run**: Set `quick_run = False` and `dataset_url = "train-clean-100"` in Q2 `train.py` for production-quality results.
-- **MPS**: PyTorch MPS backend is used on Apple Silicon automatically. Set `DEVICE = torch.device("cpu")` manually if you encounter MPS errors on older macOS versions.
+Scripts auto-detect **Apple Silicon MPS** and fall back to CPU.
+Set `DEVICE = torch.device("cpu")` manually to override.
+
+---
+
+## Key Results Summary
+
+| Question | Key Result |
+|---|---|
+| Q1 MFCC | 13-coefficient manual pipeline, shape (298, 13) |
+| Q1 Leakage | Hamming best SNR: 28.91 dB; lowest leakage: Hanning 0.0201 |
+| Q1 V/UV | Voiced 46%, Unvoiced 34%, Silence 20% |
+| Q1 RMSE | 105.63 ms boundary alignment error |
+| Q2 Disentangled | Best val acc 1.000, EER 0.0000 |
+| Q2 Baseline | Best val acc 0.000, EER 0.0000 |
+| Q3 Audit | 2.0× male/female-proxy imbalance detected |
+| Q3 DNSMOS | Orig 3.642 / Trans 4.031 (no degradation) |
+| Q3 FAD | 4482.99 (pitch shift causes distribution shift) |
