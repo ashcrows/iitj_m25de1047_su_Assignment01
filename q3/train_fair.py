@@ -4,12 +4,11 @@ CTC-based ASR training with a custom FairnessLoss that minimises
 the inter-group (gender proxy) CTC loss variance.
 
 Fixes applied:
-  1. MPS fix: aten::_ctc_loss has no MPS kernel.
-              Model forward on MPS (fast); CTC loss computed on CPU.
-  2. Convergence fix: reduced lr 1e-3→3e-4, fairness lambda 0.3→0.05,
-              added ReduceLROnPlateau scheduler watching val CTC,
-              increased max_frames 300→400 for better temporal coverage,
-              added input LayerNorm before RNN for stable gradients.
+  1. MPS fix  : aten::_ctc_loss has no MPS kernel.
+                Model forward on MPS (fast); CTC loss computed on CPU.
+  2. Convergence: lr 1e-3→3e-4, fairness lambda 0.3→0.05,
+                LayerNorm on input, ReduceLROnPlateau (verbose removed
+                — deprecated/removed in PyTorch 2.x).
 """
 
 import sys, os, json
@@ -46,7 +45,6 @@ def text2tns(t: str) -> torch.Tensor:
 
 
 def pitch_fast(sig: np.ndarray, sr: int) -> float:
-    """Fast autocorrelation-based F0 estimate on first 50 ms."""
     fl  = min(int(sr * 0.05), len(sig))
     f   = sig[:fl] - sig[:fl].mean()
     if f.std() < 1e-5:
@@ -99,22 +97,21 @@ def collate(batch):
 # ── model ─────────────────────────────────────────────────────────────────────
 class SmallASR(nn.Module):
     """
-    Bidirectional GRU CTC-ASR.
-    LayerNorm on input stabilises gradients and speeds convergence.
+    Bidirectional GRU CTC-ASR with LayerNorm input stabilisation.
     """
     def __init__(self, idim: int = 40, hidden: int = 256, n_cls: int = None):
         super().__init__()
         if n_cls is None:
             n_cls = BLANK + 1
-        self.norm = nn.LayerNorm(idim)           # ← stabilises training
+        self.norm = nn.LayerNorm(idim)
         self.rnn  = nn.GRU(idim, hidden, num_layers=3,
                            batch_first=True, dropout=0.15,
                            bidirectional=True)
         self.fc   = nn.Linear(hidden * 2, n_cls)
 
     def forward(self, x):
-        x = x.permute(0, 2, 1)        # (B, T, idim)
-        x = self.norm(x)               # per-feature normalisation
+        x = x.permute(0, 2, 1)     # (B, T, idim)
+        x = self.norm(x)
         o, _ = self.rnn(x)
         return self.fc(o).log_softmax(-1)
 
@@ -122,14 +119,14 @@ class SmallASR(nn.Module):
 # ── fairness loss ─────────────────────────────────────────────────────────────
 class FairnessLoss(nn.Module):
     """
-    Penalises variance of per-group mean CTC losses.
     L_fair = Var({ mean_CTC^(g) : g in groups })
-    Encourages equal ASR performance across demographic groups.
+    Penalises variance of per-group CTC losses — encourages equal performance.
+    lambda=0.05 keeps fairness gradient ~5% of total, preventing instability.
     """
     def forward(self, per_sample: torch.Tensor,
                 groups: torch.Tensor) -> torch.Tensor:
         gs = groups.unique()
-        gs = gs[gs >= 0]                          # ignore 'unknown' group (-1)
+        gs = gs[gs >= 0]
         if len(gs) < 2:
             return torch.tensor(0., device=per_sample.device)
         means = [per_sample[groups == g].mean()
@@ -141,22 +138,10 @@ class FairnessLoss(nn.Module):
 
 # ── training loop ─────────────────────────────────────────────────────────────
 def train(epochs: int = 20,
-          lam:    float = 0.05,     # ← reduced from 0.3 to prevent instability
+          lam: float = 0.05,
           max_samples: int = 400,
-          batch:  int = 16,
-          lr:     float = 3e-4):    # ← reduced from 1e-3 for stable convergence
-    """
-    Train the fairness-aware CTC-ASR model.
-
-    Key hyperparameter rationale:
-      lr = 3e-4  : Adam converges cleanly on CTC tasks at this rate;
-                   1e-3 causes loss spikes on small datasets.
-      lam = 0.05 : FairnessLoss is a variance of CTC values (~100-600);
-                   even lam=0.3 adds thousands to the total loss, swamping
-                   the CTC signal. 0.05 keeps the fairness gradient ~5% of
-                   the total gradient norm.
-      ReduceLROnPlateau: halves lr if val CTC stagnates for 3 epochs.
-    """
+          batch: int = 16,
+          lr: float = 3e-4):
     ds  = ASRDataset(max_samples)
     vn  = max(1, len(ds) // 10)
     tr, va = random_split(ds, [len(ds) - vn, vn])
@@ -169,11 +154,12 @@ def train(epochs: int = 20,
     ctc   = nn.CTCLoss(blank=BLANK, reduction="none", zero_infinity=True)
     fl    = FairnessLoss()
     opt   = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-    # ReduceLROnPlateau: halve lr if val CTC does not improve for 3 epochs
-    sch   = optim.lr_scheduler.ReduceLROnPlateau(
-        opt, mode="min", factor=0.5, patience=3, verbose=True)
 
-    hist  = {"ctc": [], "fair": [], "val": [], "lr": []}
+    # verbose= was removed in PyTorch 2.x — do NOT pass it
+    sch = optim.lr_scheduler.ReduceLROnPlateau(
+        opt, mode="min", factor=0.5, patience=3)
+
+    hist = {"ctc": [], "fair": [], "val": [], "lr": []}
 
     for ep in range(1, epochs + 1):
         model.train()
@@ -181,10 +167,10 @@ def train(epochs: int = 20,
 
         for mfcc, lbls, llens, genders in tr_ld:
             mfcc = mfcc.to(DEVICE)
-            lp   = model(mfcc)                     # (B, T, C) on DEVICE
+            lp   = model(mfcc)                        # (B, T, C) on DEVICE
 
-            # CTC loss must run on CPU (no MPS kernel)
-            lpt       = lp.permute(1, 0, 2).to(CPU)          # (T, B, C)
+            # CTC must run on CPU
+            lpt       = lp.permute(1, 0, 2).to(CPU)  # (T, B, C)
             lbls_cpu  = lbls.to(CPU)
             llens_cpu = llens.to(CPU)
             ilen      = torch.full((lp.shape[0],), lp.shape[1],
@@ -204,7 +190,7 @@ def train(epochs: int = 20,
             ef += fair_term.item()
             nb += 1
 
-        # ── validation ──
+        # Validation
         model.eval()
         vc = 0
         with torch.no_grad():
@@ -224,7 +210,7 @@ def train(epochs: int = 20,
         avg_val = vc / n_val
         cur_lr  = opt.param_groups[0]["lr"]
 
-        sch.step(avg_val)   # adapt lr based on validation CTC
+        sch.step(avg_val)   # adapt lr based on val CTC
 
         hist["ctc"].append(avg_ctc)
         hist["fair"].append(avg_fair)
@@ -235,30 +221,34 @@ def train(epochs: int = 20,
               f"ctc={avg_ctc:.2f}  fair={avg_fair:.2f}  "
               f"val={avg_val:.2f}  lr={cur_lr:.2e}")
 
-    # ── save checkpoint + history ──
+    # Save checkpoint + history
     ckpt_path = os.path.join(RES, "fair_asr.pt")
     torch.save(model.state_dict(), ckpt_path)
     with open(os.path.join(RES, "fair_hist.json"), "w") as f:
         json.dump(hist, f, indent=2)
     print(f"[Q3-Fair] checkpoint saved → {ckpt_path}")
 
-    # ── plots ──
+    # Plots
     ep_ax = range(1, len(hist["ctc"]) + 1)
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
     axes[0].plot(ep_ax, hist["ctc"], label="Train CTC", marker="o", ms=4)
     axes[0].plot(ep_ax, hist["val"], label="Val CTC",   marker="s", ms=4)
     axes[0].set_title("CTC Loss (lower = better)")
-    axes[0].set_xlabel("Epoch"); axes[0].legend(); axes[0].grid(True, alpha=0.3)
+    axes[0].set_xlabel("Epoch")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
 
     axes[1].plot(ep_ax, hist["fair"], color="red", marker="^", ms=4)
     axes[1].set_title("Fairness Loss (group CTC variance)")
-    axes[1].set_xlabel("Epoch"); axes[1].grid(True, alpha=0.3)
+    axes[1].set_xlabel("Epoch")
+    axes[1].grid(True, alpha=0.3)
 
     axes[2].plot(ep_ax, hist["lr"], color="purple", marker=".", ms=4)
     axes[2].set_title("Learning Rate (ReduceLROnPlateau)")
     axes[2].set_xlabel("Epoch")
-    axes[2].set_yscale("log"); axes[2].grid(True, alpha=0.3)
+    axes[2].set_yscale("log")
+    axes[2].grid(True, alpha=0.3)
 
     plt.suptitle("Fairness-Aware CTC-ASR Training", fontsize=12)
     plt.tight_layout()
@@ -272,8 +262,8 @@ def train(epochs: int = 20,
 if __name__ == "__main__":
     train(
         epochs=20,
-        lam=0.05,          # fairness lambda: 0.05 keeps it ~5% of total gradient
+        lam=0.05,
         max_samples=400,
         batch=16,
-        lr=3e-4,           # stable Adam lr for CTC on small datasets
+        lr=3e-4,
     )
