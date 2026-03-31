@@ -416,3 +416,13 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+
+.venv/*
+.DS_Store
+
+# dataset
+q1/data/*
+data/*
+q2/data/*
+q3/data/*

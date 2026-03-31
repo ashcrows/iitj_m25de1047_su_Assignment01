@@ -1,0 +1,21 @@
+# configs/default.yaml
+# Override CONFIG dict in train.py / eval.py by loading this file.
+
+data_dir:        "./data"
+results_dir:     "./results"
+checkpoint_dir:  "./checkpoints"
+
+# Use "test-clean" for a quick run (~346 MB); "train-clean-100" for full training (~6 GB)
+dataset_url:     "test-clean"
+quick_run:       true
+
+sample_rate:     16000
+n_mfcc:          40
+num_epochs:      20
+batch_size:      32
+lr:              0.001
+lambda_grl:      0.5
+embedding_dim:   128
+num_envs:        3
+max_samples:     2000
+seed:            42
